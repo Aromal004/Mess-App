@@ -96,22 +96,30 @@ def order():
         return redirect('/login')
 
     now = datetime.now()
-    cutoff = now.replace(hour=20, minute=30, second=0, microsecond=0)
-    if now > cutoff:
-        return "⛔ Order time is over. You can order only before 08:30 PM."
-
+    cancel_cutoff = now.replace(hour=19, minute=0, second=0, microsecond=0)  # Cancel by 7:00 PM
     student_id = session['user_id']
     today = datetime.today().date()
-    existing = Order.query.filter(
-        db.func.date(Order.timestamp) == today,
-        Order.student_id == student_id
-    ).first()
 
     if request.method == 'POST':
-        item = request.form['item']
-        is_coupon = False
-        priority = False
+        if 'delete' in request.form:
+            if now <= cancel_cutoff:
+                Order.query.filter(
+                    db.func.date(Order.timestamp) == today,
+                    Order.student_id == student_id
+                ).delete()
+                db.session.commit()
+                flash("Your order was deleted.")
+                return redirect('/order')
+            else:
+                flash("⛔ You cannot delete orders after 7:00 PM.")
+                return redirect('/order')
 
+        items = request.form.getlist('item')
+        if not items:
+            flash("Please select at least one item.")
+            return redirect('/order')
+
+        # Handle streak logic
         streak = Streak.query.filter_by(student_id=student_id).first()
         if streak:
             if streak.last_order_date == today - timedelta(days=1):
@@ -123,29 +131,38 @@ def order():
             streak = Streak(student_id=student_id, last_order_date=today, streak_count=1)
             db.session.add(streak)
 
+        use_coupon = False
+        is_priority = False
         if streak.streak_count == 3:
-            is_coupon = True
-            priority = True
+            use_coupon = True
+            is_priority = True
             streak.streak_count = 0
 
-        if existing:
-            existing.item = item
-            existing.timestamp = datetime.now()
-            existing.is_coupon = is_coupon
-            existing.priority = priority
-        else:
+        Order.query.filter(
+            db.func.date(Order.timestamp) == today,
+            Order.student_id == student_id
+        ).delete()
+
+        for item in items:
             order = Order(
                 student_id=student_id,
                 item=item,
-                is_coupon=is_coupon,
-                priority=priority
+                is_coupon=use_coupon,
+                priority=is_priority
             )
             db.session.add(order)
 
         db.session.commit()
-        return render_template('confirm.html', item=item)
+        return render_template('confirm.html', item=", ".join(items))
 
-    return render_template('order.html', existing=existing)
+    existing = Order.query.filter(
+        db.func.date(Order.timestamp) == today,
+        Order.student_id == student_id
+    ).all()
+
+    return render_template('order.html', existing=existing, before_cutoff=(now <= cancel_cutoff))
+
+
 
 @app.route('/admin')
 @login_required
