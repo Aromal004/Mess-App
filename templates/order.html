@@ -1,0 +1,21 @@
+{% extends "layout.html" %}
+{% block title %}Place Order{% endblock %}
+{% block content %}
+<h2 class="mb-4">Order Meal</h2>
+<form method="post">
+    <div class="mb-3">
+        <select name="item" class="form-select" required>
+            <option value="">-- Select Item --</option>
+            <option value="Meals">Meals (₹40)</option>
+            <option value="Chai">Chai (₹10)</option>
+            <option value="Snacks">Snacks (₹15–25)</option>
+        </select>
+    </div>
+    <button class="btn btn-primary">Submit Order</button>
+</form>
+{% if existing %}
+<div class="alert alert-info mt-3">
+    You already placed an order today. Re-submitting will update it.
+</div>
+{% endif %}
+{% endblock %}
