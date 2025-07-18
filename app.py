@@ -5,15 +5,15 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key_here'  # Change this in production
+app.secret_key = 'your_secret_key_here'  # Replace with a strong secret in production
 
-# PostgreSQL DB config
+# PostgreSQL config
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:2004@localhost:5432/canteen_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
-# ------------------ Models ------------------
+# ---------- Models ----------
 
 class User(db.Model):
     __tablename__ = 'users'
@@ -30,6 +30,7 @@ class Order(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     is_coupon = db.Column(db.Boolean, default=False)
     priority = db.Column(db.Boolean, default=False)
+    paid = db.Column(db.Boolean, default=False)
 
 class Streak(db.Model):
     __tablename__ = 'streaks'
@@ -38,7 +39,18 @@ class Streak(db.Model):
     last_order_date = db.Column(db.Date)
     streak_count = db.Column(db.Integer, default=0)
 
-# ------------------ Helpers ------------------
+# ---------- Constants ----------
+
+ITEM_PRICES = {
+    'meal': 50,
+    'chai': 10,
+    'snack': 20
+}
+
+SERVING_TIME = datetime.now().replace(hour=20, minute=0, second=0, microsecond=0)
+CANCEL_CUTOFF = SERVING_TIME.replace(hour=19, minute=0)
+
+# ---------- Helpers ----------
 
 def login_required(f):
     @wraps(f)
@@ -48,7 +60,7 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated
 
-# ------------------ Routes ------------------
+# ---------- Routes ----------
 
 @app.route('/')
 def home():
@@ -96,7 +108,7 @@ def order():
         return redirect('/login')
 
     now = datetime.now()
-    cancel_cutoff = now.replace(hour=19, minute=0, second=0, microsecond=0)  # Cancel by 7:00 PM
+    cancel_cutoff = now.replace(hour=19, minute=0, second=0, microsecond=0)
     student_id = session['user_id']
     today = datetime.today().date()
 
@@ -109,17 +121,45 @@ def order():
                 ).delete()
                 db.session.commit()
                 flash("Your order was deleted.")
-                return redirect('/order')
             else:
                 flash("⛔ You cannot delete orders after 7:00 PM.")
-                return redirect('/order')
+            return redirect('/order')
 
         items = request.form.getlist('item')
         if not items:
             flash("Please select at least one item.")
             return redirect('/order')
 
-        # Handle streak logic
+        session['pending_items'] = items  # Save selection for payment
+        return redirect('/pay')
+
+    existing = Order.query.filter(
+        db.func.date(Order.timestamp) == today,
+        Order.student_id == student_id
+    ).all()
+
+    return render_template('order.html', existing=existing, before_cutoff=(now <= cancel_cutoff))
+
+
+
+@app.route('/pay', methods=['GET', 'POST'])
+@login_required
+def pay():
+    if session.get('role') != 'student':
+        return redirect('/login')
+
+    student_id = session['user_id']
+    today = datetime.today().date()
+    items = session.get('pending_items', [])
+
+    if not items:
+        flash("No items selected for payment.")
+        return redirect('/order')
+
+    total = sum(ITEM_PRICES.get(item.lower(), 0) for item in items)
+
+    if request.method == 'POST':
+        # --- Streak Logic ---
         streak = Streak.query.filter_by(student_id=student_id).first()
         if streak:
             if streak.last_order_date == today - timedelta(days=1):
@@ -138,29 +178,29 @@ def order():
             is_priority = True
             streak.streak_count = 0
 
+        # Delete existing orders for today before placing new ones
         Order.query.filter(
             db.func.date(Order.timestamp) == today,
             Order.student_id == student_id
         ).delete()
 
+        # Create new orders
         for item in items:
+            is_free = use_coupon and ITEM_PRICES.get(item.lower(), 0) > 0
             order = Order(
                 student_id=student_id,
                 item=item,
-                is_coupon=use_coupon,
-                priority=is_priority
+                is_coupon=is_free,
+                priority=is_priority,
+                paid=True
             )
             db.session.add(order)
 
         db.session.commit()
-        return render_template('confirm.html', item=", ".join(items))
+        session.pop('pending_items', None)
+        return render_template('payment_success.html', total=total)
 
-    existing = Order.query.filter(
-        db.func.date(Order.timestamp) == today,
-        Order.student_id == student_id
-    ).all()
-
-    return render_template('order.html', existing=existing, before_cutoff=(now <= cancel_cutoff))
+    return render_template('payment.html', items=items, total=total, ITEM_PRICES=ITEM_PRICES)
 
 
 
@@ -169,17 +209,38 @@ def order():
 def admin():
     if session.get('role') != 'admin':
         return redirect('/login')
-    today = datetime.today().date()
-    orders = Order.query.filter(db.func.date(Order.timestamp) == today).order_by(
-        Order.priority.desc(), Order.timestamp).all()
-    return render_template('admin.html', orders=orders)
 
-# ------------------ DB Init ------------------
+    today = datetime.today().date()
+    sort_by = request.args.get('sort', 'priority')  # default
+
+    if sort_by == 'time':
+        orders = Order.query.filter(
+            db.func.date(Order.timestamp) == today
+        ).order_by(Order.timestamp).all()
+    else:
+        orders = Order.query.filter(
+            db.func.date(Order.timestamp) == today
+        ).order_by(Order.priority.desc(), Order.timestamp).all()
+
+    item_counts = db.session.query(Order.item, db.func.count(Order.item)).filter(
+        db.func.date(Order.timestamp) == today
+    ).group_by(Order.item).all()
+
+    total_orders = sum(count for _, count in item_counts)
+
+    return render_template('admin.html',
+        orders=orders,
+        total=total_orders,
+        item_counts=item_counts,
+        current_sort=sort_by
+    )
+
+# ---------- DB Init ----------
 
 with app.app_context():
     db.create_all()
 
-# ------------------ Run Server ------------------
+# ---------- Run Server ----------
 
 if __name__ == '__main__':
     app.run(debug=True)

@@ -3,44 +3,56 @@
 <head>
     <title>Place Order</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .logout-btn {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+        }
+    </style>
 </head>
-<body class="container py-5">
-    <h2 class="mb-4">Welcome, {{ session['username'] }}</h2>
+<body class="bg-light position-relative">
 
-    {% if existing %}
-        <div class="alert alert-info">
-            <strong>Today's Order:</strong>
-            <ul>
-                {% for e in existing %}
-                    <li>{{ e.item }} {% if e.is_coupon %}(Coupon Used){% endif %}</li>
-                {% endfor %}
-            </ul>
-        </div>
-        {% if before_cutoff %}
-        <form method="post">
-            <input type="hidden" name="delete" value="true">
-            <button class="btn btn-danger">Delete Today's Order</button>
-        </form>
-        {% endif %}
-    {% else %}
-        <form method="POST">
-            <div class="mb-3">
-                <label>Select Items:</label><br>
+    <a href="{{ url_for('logout') }}" class="btn btn-outline-danger logout-btn">Logout</a>
+
+    <div class="container py-5 mt-4">
+        <h2 class="mb-4">Welcome, {{ session['username'] }}</h2>
+
+        {% if existing %}
+            <div class="alert alert-info">
+                <strong>Today's Order:</strong>
+                <ul>
+                    {% for e in existing %}
+                        <li>{{ e.item }} {% if e.is_coupon %}(Coupon Used){% endif %}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+
+            {% if before_cutoff %}
+                <form method="post">
+                    <input type="hidden" name="delete" value="true">
+                    <button class="btn btn-danger">Delete Today's Order</button>
+                </form>
+            {% endif %}
+
+        {% else %}
+            <form method="post">
                 <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="item" value="Meals" id="meals">
-                    <label class="form-check-label" for="meals">Meals (₹40)</label>
+                    <input class="form-check-input" type="checkbox" name="item" value="meal" id="meal">
+                    <label class="form-check-label" for="meal">Meal (₹50)</label>
                 </div>
                 <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="item" value="Chai" id="chai">
+                    <input class="form-check-input" type="checkbox" name="item" value="chai" id="chai">
                     <label class="form-check-label" for="chai">Chai (₹10)</label>
                 </div>
                 <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="item" value="Snacks" id="snacks">
-                    <label class="form-check-label" for="snacks">Snacks (₹20)</label>
+                    <input class="form-check-input" type="checkbox" name="item" value="snack" id="snack">
+                    <label class="form-check-label" for="snack">Snack (₹20)</label>
                 </div>
-            </div>
-            <button type="submit" class="btn btn-primary">Submit Order</button>
-        </form>
-    {% endif %}
+
+                <button type="submit" class="btn btn-primary mt-3">Submit Order</button>
+            </form>
+        {% endif %}
+    </div>
 </body>
 </html>
