@@ -27,10 +27,12 @@ class Order(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('users.id'))
     item = db.Column(db.String(100))
+    quantity = db.Column(db.Integer, default=1)  # NEW
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     is_coupon = db.Column(db.Boolean, default=False)
     priority = db.Column(db.Boolean, default=False)
     paid = db.Column(db.Boolean, default=False)
+
 
 class Streak(db.Model):
     __tablename__ = 'streaks'
@@ -113,24 +115,32 @@ def order():
     today = datetime.today().date()
 
     if request.method == 'POST':
-        if 'delete' in request.form:
-            if now <= cancel_cutoff:
-                Order.query.filter(
-                    db.func.date(Order.timestamp) == today,
-                    Order.student_id == student_id
-                ).delete()
+        if 'delete_id' in request.form:
+            # delete specific order
+            order_id = int(request.form['delete_id'])
+            order_to_delete = Order.query.get(order_id)
+            if order_to_delete and order_to_delete.student_id == student_id and now <= cancel_cutoff:
+                db.session.delete(order_to_delete)
                 db.session.commit()
-                flash("Your order was deleted.")
+                flash("Order deleted.")
             else:
-                flash("⛔ You cannot delete orders after 7:00 PM.")
+                flash("⛔ Cannot delete order.")
             return redirect('/order')
 
-        items = request.form.getlist('item')
-        if not items:
-            flash("Please select at least one item.")
+        # handle placing order
+        item_quantities = {}
+        for item in ITEM_PRICES:
+            qty = request.form.get(item)
+            if qty and qty.isdigit():
+                q = int(qty)
+                if q > 0:
+                    item_quantities[item] = q
+
+        if not item_quantities:
+            flash("Please select at least one item with quantity.")
             return redirect('/order')
 
-        session['pending_items'] = items  # Save selection for payment
+        session['pending_items'] = item_quantities
         return redirect('/pay')
 
     existing = Order.query.filter(
@@ -138,7 +148,14 @@ def order():
         Order.student_id == student_id
     ).all()
 
-    return render_template('order.html', existing=existing, before_cutoff=(now <= cancel_cutoff))
+    return render_template(
+    'order.html',
+    existing=existing,
+    before_cutoff=(now <= cancel_cutoff),
+    ITEM_PRICES=ITEM_PRICES
+)
+
+
 
 
 
@@ -150,16 +167,16 @@ def pay():
 
     student_id = session['user_id']
     today = datetime.today().date()
-    items = session.get('pending_items', [])
+    item_quantities = session.get('pending_items', {})
 
-    if not items:
+    if not item_quantities:
         flash("No items selected for payment.")
         return redirect('/order')
 
-    total = sum(ITEM_PRICES.get(item.lower(), 0) for item in items)
+    total = sum(ITEM_PRICES[item] * qty for item, qty in item_quantities.items())
 
     if request.method == 'POST':
-        # --- Streak Logic ---
+        # Streak logic
         streak = Streak.query.filter_by(student_id=student_id).first()
         if streak:
             if streak.last_order_date == today - timedelta(days=1):
@@ -178,29 +195,26 @@ def pay():
             is_priority = True
             streak.streak_count = 0
 
-        # Delete existing orders for today before placing new ones
-        Order.query.filter(
-            db.func.date(Order.timestamp) == today,
-            Order.student_id == student_id
-        ).delete()
-
-        # Create new orders
-        for item in items:
-            is_free = use_coupon and ITEM_PRICES.get(item.lower(), 0) > 0
-            order = Order(
-                student_id=student_id,
-                item=item,
-                is_coupon=is_free,
-                priority=is_priority,
-                paid=True
-            )
-            db.session.add(order)
+        # Create orders
+        for item, qty in item_quantities.items():
+            for _ in range(qty):
+                is_free = use_coupon and ITEM_PRICES[item] > 0
+                order = Order(
+                    student_id=student_id,
+                    item=item,
+                    quantity=1,
+                    is_coupon=is_free,
+                    priority=is_priority,
+                    paid=True
+                )
+                db.session.add(order)
 
         db.session.commit()
         session.pop('pending_items', None)
         return render_template('payment_success.html', total=total)
 
-    return render_template('payment.html', items=items, total=total, ITEM_PRICES=ITEM_PRICES)
+    return render_template('payment.html', items=item_quantities, total=total, ITEM_PRICES=ITEM_PRICES)
+
 
 
 
