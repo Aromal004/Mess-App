@@ -61,17 +61,17 @@
                         </tr>
                     </thead>
                     <tbody>
-                        {% for order in existing %}
+                        {% for item, qty, time, is_coupon, is_priority, order_id in existing %}
                             <tr>
-                                <td>{{ order.item }}</td>
-                                <td>{{ order.timestamp.strftime('%I:%M %p') }}</td>
-                                <td>{{ '✅' if order.is_coupon else '❌' }}</td>
-                                <td>{{ '🔥' if order.priority else '—' }}</td>
-                                <td>{{ order.quantity }}</td>
+                                <td>{{ item }}</td>
+                                <td>{{ time.strftime('%I:%M %p') }}</td>
+                                <td>{{ '✅' if is_coupon else '❌' }}</td>
+                                <td>{{ '🔥' if is_priority else '—' }}</td>
+                                <td>{{ qty }}</td>
                                 {% if before_cutoff %}
                                 <td>
                                     <form method="POST">
-                                        <input type="hidden" name="delete_id" value="{{ order.id }}">
+                                        <input type="hidden" name="delete_id" value="{{ order_id }}">
                                         <button type="submit" class="btn btn-sm btn-danger">Delete</button>
                                     </form>
                                 </td>

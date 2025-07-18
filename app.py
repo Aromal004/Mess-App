@@ -116,18 +116,22 @@ def order():
 
     if request.method == 'POST':
         if 'delete_id' in request.form:
-            # delete specific order
+            # Delete a single order by ID
             order_id = int(request.form['delete_id'])
             order_to_delete = Order.query.get(order_id)
+
             if order_to_delete and order_to_delete.student_id == student_id and now <= cancel_cutoff:
+                item_name = order_to_delete.item
+                refund_amount = 0 if order_to_delete.is_coupon else ITEM_PRICES[item_name]
                 db.session.delete(order_to_delete)
                 db.session.commit()
-                flash("Order deleted.")
+                flash(f"✅ {item_name.capitalize()} order deleted. Refund of ₹{refund_amount} initiated.")
             else:
                 flash("⛔ Cannot delete order.")
+
             return redirect('/order')
 
-        # handle placing order
+        # Place new orders
         item_quantities = {}
         for item in ITEM_PRICES:
             qty = request.form.get(item)
@@ -143,19 +147,27 @@ def order():
         session['pending_items'] = item_quantities
         return redirect('/pay')
 
-    existing = Order.query.filter(
-        db.func.date(Order.timestamp) == today,
+    # Group today's orders by item
+    from sqlalchemy import func
+
+    existing = db.session.query(
+        Order.item,
+        func.sum(Order.quantity),
+        func.max(Order.timestamp),
+        func.bool_or(Order.is_coupon),
+        func.bool_or(Order.priority),
+        func.min(Order.id)
+    ).filter(
+        func.date(Order.timestamp) == today,
         Order.student_id == student_id
-    ).all()
+    ).group_by(Order.item).all()
 
     return render_template(
-    'order.html',
-    existing=existing,
-    before_cutoff=(now <= cancel_cutoff),
-    ITEM_PRICES=ITEM_PRICES
-)
-
-
+        'order.html',
+        existing=existing,
+        before_cutoff=(now <= cancel_cutoff),
+        ITEM_PRICES=ITEM_PRICES
+    )
 
 
 
